@@ -37,7 +37,6 @@ async function updatePopup() {
     }
     else {
         document.querySelector('#website')!.textContent = 'Compatible website detected : ' + pageStatus.website;
-        // document.querySelector('#download')!.innerHTML = '<button>Download</button><span id="progress"></span>';
         document.querySelector('#download > button')!.addEventListener('click', download);
 
     }
