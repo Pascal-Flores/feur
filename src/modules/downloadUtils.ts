@@ -11,12 +11,9 @@ export async function fetchAndRetry(url : string, options : RequestInit = {}, re
     return fetch(url, options).then((response) => {
         if (response.ok)
             return response;
-        else if (retries > 0)
-            return fetchAndRetry(url, options, retries - 1);
         else
             throw new Error('Failed to fetch ' + url);
-    })
-    .catch((error) => {
+    }).catch((error) => {
         if (retries > 0)
             return fetchAndRetry(url, options, retries - 1);
         else
