@@ -136,30 +136,30 @@ class SushiScanContentManager implements ContentManager {
 
     private async getZipFromImagesLinks(imagesLinks : string[]) : Promise<Blob> {
         const volume = new JSZip();
-        const imagePromises : Promise<void>[] = [];
-
+        const downloadErrors : Error[] = [];
         try{chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: 0, total: imagesLinks.length}});}
             catch(error) {console.warn(error);}
 
         let progress = 0;
-        imagesLinks.forEach((imageLink) => {
-            const promise = fetchAndRetry(imageLink, {}, 10)
-            .then(async (response) => {
+        for (const imageLink of imagesLinks) {
+            try {
+                const response = await fetchAndRetry(imageLink, {}, 10);
+                if (!response.ok)
+                    throw new Error('Failed to download image ' + imageLink + ' : ' + response.status);
                 const filename = imageLink.substring(imageLink.lastIndexOf('/') + 1);
                 volume.file(filename, await response.blob());
-            })
-            .catch((error) => {throw error})
-            .finally(() => {
                 try {chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: progress++, total: imagesLinks.length}})}
                 catch(error) {console.warn(error);}
-            });
-            
-            imagePromises.push(promise);
-        });
+            }
+            catch(error) {downloadErrors.push(error as Error);}
+        }
 
-        await Promise.all(imagePromises);
-        const volumeAsZip = await volume.generateAsync({ type: 'blob' });
-        return volumeAsZip;
+        if (downloadErrors.length > 0)
+            throw new Error('Failed to download some images :\n' + downloadErrors.map((error) => error.message).join(",\n "));
+        else {
+            const volumeAsZip = await volume.generateAsync({ type: 'blob' });
+            return volumeAsZip;
+        }
     }
 
     private async downloadvolumeAndRetry(url : string, retries = 3) : Promise<void> {
