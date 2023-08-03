@@ -134,6 +134,11 @@ class SushiScanContentManager implements ContentManager {
         return url.split('/')[url.split('/').length - 1] + '.cbz';
     }
 
+    /**
+     * fetches all the images from the given links and returns them as a zip blob
+     * @param imagesLinks The links of the images to download
+     * @returns A promise that resolves with the zip blob or rejects if an error occured
+     */
     private async getZipFromImagesLinks(imagesLinks : string[]) : Promise<Blob> {
         const volume = new JSZip();
         const downloadErrors : Error[] = [];
@@ -162,6 +167,14 @@ class SushiScanContentManager implements ContentManager {
         }
     }
 
+    /**
+     * Tries to download the volume at the given url and retries if it fails
+     * @param url The url of the volume
+     * @param retries The number of times the download should be retried if it fails
+     * @returns A promise that resolves when the download is finished or rejects if an error occured after all the retries
+     * @remarks
+     * To ease naming, the term `volume` is used to refer to a chapter or a volume
+     */
     private async downloadvolumeAndRetry(url : string, retries = 3) : Promise<void> {
         return this.downloadVolume(url).catch((error) => {
             if (retries > 0)
