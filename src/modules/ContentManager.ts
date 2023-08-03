@@ -68,32 +68,13 @@ class SushiScanContentManager implements ContentManager {
     
     public async downloadVolume(url : string) : Promise<void> {
         return fetch(url).then(async (response) => {
-            const volume = new JSZip();
-            const imagePromises : Promise<void>[] = [];
             const html = new DOMParser().parseFromString(await response.text(), 'text/html');
-            const imagesLinks = this.parseVolumeImagesLinks(html);
+            const volumeImagesLinks = this.parseVolumeImagesLinks(html);
 
-            try{chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: 0, total: imagesLinks.length}});}
-            catch(error) {console.error(error);}
-
-            let progress = 0;
-            imagesLinks.forEach((imageLink) => {
-                const promise = fetchAndRetry(imageLink, {}, 10)
-                .then(async (response) => {
-                    const filename = imageLink.substring(imageLink.lastIndexOf('/') + 1);
-                    volume.file(filename, await response.blob());
-                })
-                .catch((error) => {throw error})
-                .finally(() => {
-                    try {chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: progress++, total: imagesLinks.length}})}
-                    catch(error) {console.error(error);}
-                });
-                
-                imagePromises.push(promise);
-            });
-
-            await Promise.all(imagePromises);
-            const volumeAsZip = await volume.generateAsync({ type: 'blob' });
+            let volumeAsZip : Blob;
+            try {volumeAsZip = await this.getZipFromImagesLinks(volumeImagesLinks);}
+            catch (error) {throw new Error('Failed to download volume : ' + (error as Error).message);}
+            
             FileSaver.saveAs(volumeAsZip, this.parseVolumeTitle(url));
             return;
         });
@@ -103,10 +84,10 @@ class SushiScanContentManager implements ContentManager {
         return fetch(url).then(async (response) => {
             const html = new DOMParser().parseFromString(await response.text(), 'text/html');
             const volumesLinks = this.parseVolumesLinks(html);
-            console.log(volumesLinks);
 
             for (const volumeLink of volumesLinks)
-                await this.downloadvolumeAndRetry(volumeLink);
+                try {await this.downloadvolumeAndRetry(volumeLink); }
+                catch (error) { console.warn(error); }
         });
     }
 
@@ -153,6 +134,47 @@ class SushiScanContentManager implements ContentManager {
         return url.split('/')[url.split('/').length - 1] + '.cbz';
     }
 
+    /**
+     * fetches all the images from the given links and returns them as a zip blob
+     * @param imagesLinks The links of the images to download
+     * @returns A promise that resolves with the zip blob or rejects if an error occured
+     */
+    private async getZipFromImagesLinks(imagesLinks : string[]) : Promise<Blob> {
+        const volume = new JSZip();
+        const downloadErrors : Error[] = [];
+        try{chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: 0, total: imagesLinks.length}});}
+            catch(error) {console.warn(error);}
+
+        let progress = 0;
+        for (const imageLink of imagesLinks) {
+            try {
+                const response = await fetchAndRetry(imageLink, {}, 10);
+                if (!response.ok)
+                    throw new Error('Failed to download image ' + imageLink + ' : ' + response.status);
+                const filename = imageLink.substring(imageLink.lastIndexOf('/') + 1);
+                volume.file(filename, await response.blob());
+                try {chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: progress++, total: imagesLinks.length}})}
+                catch(error) {console.warn(error);}
+            }
+            catch(error) {downloadErrors.push(error as Error);}
+        }
+
+        if (downloadErrors.length > 0)
+            throw new Error('Failed to download some images :\n' + downloadErrors.map((error) => error.message).join(",\n "));
+        else {
+            const volumeAsZip = await volume.generateAsync({ type: 'blob' });
+            return volumeAsZip;
+        }
+    }
+
+    /**
+     * Tries to download the volume at the given url and retries if it fails
+     * @param url The url of the volume
+     * @param retries The number of times the download should be retried if it fails
+     * @returns A promise that resolves when the download is finished or rejects if an error occured after all the retries
+     * @remarks
+     * To ease naming, the term `volume` is used to refer to a chapter or a volume
+     */
     private async downloadvolumeAndRetry(url : string, retries = 3) : Promise<void> {
         return this.downloadVolume(url).catch((error) => {
             if (retries > 0)
