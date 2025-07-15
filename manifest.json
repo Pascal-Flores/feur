@@ -6,6 +6,7 @@
     "author" : "Open Sus",
     "permissions": [
         "webRequest",
+        "scripting",
         "downloads"
     ],
     "host_permissions" : [
@@ -26,6 +27,8 @@
     "action": {
         "default_popup": "assets/html/popup.html",
         "default_title": "Feur"
+    },
+    "background": {
+        "service_worker": "dist/background.js"
     }
-
 }

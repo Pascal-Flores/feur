@@ -1,7 +1,5 @@
 import { DownloadType, SupportedWebsite } from './supported_websites';
-import { fetchAndRetry } from './downloadUtils';
 import FileSaver from 'file-saver';
-import JSZip from 'jszip';
 
 /**
  * An interface that defines the methods that a content manager should implement
@@ -72,7 +70,9 @@ class SushiScanContentManager implements ContentManager {
             const volumeImagesLinks = this.parseVolumeImagesLinks(html);
 
             let volumeAsZip : Blob;
-            try {volumeAsZip = await this.getZipFromImagesLinks(volumeImagesLinks);}
+            // try {volumeAsZip = await this.getZipFromImagesLinks(volumeImagesLinks);}
+            try {volumeAsZip = await chrome.runtime.sendMessage({type: 'download', urls: volumeImagesLinks});}
+
             catch (error) {throw new Error('Failed to download volume : ' + (error as Error).message);}
             
             FileSaver.saveAs(volumeAsZip, this.parseVolumeTitle(url));
@@ -113,10 +113,21 @@ class SushiScanContentManager implements ContentManager {
      * To ease naming, the term `volume` is used to refer to a chapter or a volume
      */
     private parseVolumeImagesLinks(html : Document) : string[] {
-        const imagesElements = Array.from(html.querySelectorAll('#readerarea > noscript > p > img'));
-        const imagesLinks = imagesElements.map(element => element.getAttribute('src'))
-        .filter((src) => src !== null && src !== undefined) as string[]
-        imagesLinks.forEach((src, index, array) => array[index] = src.replace('http://', 'https://'));
+        let imagesLinks : string[] = []
+
+        const scripts = html.querySelectorAll("script")
+        if (scripts.length > 0) {
+            scripts.forEach((script) => {
+                if (script.textContent !== null && script.textContent !== undefined && script.textContent.includes("ts_reader.run")) {
+                    const regex = /ts_reader\.run\s*\(([^)]+)\)/g
+                    let match
+                    while ((match = regex.exec(script.textContent)) !== null) {
+                        const contenu = match[1].trim()
+                        imagesLinks = JSON.parse(contenu).sources[0].images
+                    }
+                }
+            })
+        }
 
         return imagesLinks;
     }
@@ -132,39 +143,6 @@ class SushiScanContentManager implements ContentManager {
         if (url.endsWith('/'))
             url = url.substring(0, url.length - 1);
         return url.split('/')[url.split('/').length - 1] + '.cbz';
-    }
-
-    /**
-     * fetches all the images from the given links and returns them as a zip blob
-     * @param imagesLinks The links of the images to download
-     * @returns A promise that resolves with the zip blob or rejects if an error occured
-     */
-    private async getZipFromImagesLinks(imagesLinks : string[]) : Promise<Blob> {
-        const volume = new JSZip();
-        const downloadErrors : Error[] = [];
-        try{chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: 0, total: imagesLinks.length}});}
-            catch(error) {console.warn(error);}
-
-        let progress = 0;
-        for (const imageLink of imagesLinks) {
-            try {
-                const response = await fetchAndRetry(imageLink, {}, 10);
-                if (!response.ok)
-                    throw new Error('Failed to download image ' + imageLink + ' : ' + response.status);
-                const filename = imageLink.substring(imageLink.lastIndexOf('/') + 1);
-                volume.file(filename, await response.blob());
-                try {chrome.runtime.sendMessage({type: 'volume_download_progess', progress: {current: progress++, total: imagesLinks.length}})}
-                catch(error) {console.warn(error);}
-            }
-            catch(error) {downloadErrors.push(error as Error);}
-        }
-
-        if (downloadErrors.length > 0)
-            throw new Error('Failed to download some images :\n' + downloadErrors.map((error) => error.message).join(",\n "));
-        else {
-            const volumeAsZip = await volume.generateAsync({ type: 'blob' });
-            return volumeAsZip;
-        }
     }
 
     /**
